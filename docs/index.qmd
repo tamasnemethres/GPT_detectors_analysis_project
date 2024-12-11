@@ -1,0 +1,511 @@
+---
+title: "Final Project_v1"
+format: html
+editor: visual
+editor_options: 
+  chunk_output_type: console
+---
+
+## The Data
+
+The data comes from the 29th Tidy Tuesday Projects (see more:https://github.com/rfordatascience/tidytuesday) in 2023. The Data is based on the paper of Liang et al.'s (2023) paper, which investigates the reliability of the GPT detectors.
+
+```{r}
+library(tidyverse)
+library(tidytuesdayR)
+library(psych)
+library(brms)
+library(viridis)
+library(car)
+library(WRS2)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+```
+
+### The data
+
+```{r the data}
+dataset <- tt_load("2023-07-18")
+names(dataset)
+detectors <- dataset$detectors
+str(detectors)
+class(detectors)
+detectors_df <- as.data.frame(detectors)
+str(detectors_df)
+```
+
+### Investigating the Qualitiative data
+
+```{r Qualitative data}
+table(detectors_df$kind)
+table(detectors_df$.pred_class)
+table(detectors_df$detector)
+detectors_df$detector <- as.factor(detectors_df$detector)
+table(detectors_df$native)
+table(detectors_df$name)
+detectors_df$name <- as.factor(detectors_df$name)
+table(detectors_df$model)
+detectors_df$model<- as.factor(detectors_df$model)
+table(detectors_df$prompt)
+detectors_df$prompt<- as.factor(detectors_df$prompt)
+detectors_df$native <- as.factor(detectors_df$native) 
+
+
+#recoding native - making sure 1 is for yes and no for 0 
+detectors_df <- detectors_df %>%
+  mutate(native_2 = case_when(
+    native== "No" ~ 0,
+    native== "Yes" ~ 1))
+str(detectors_df)
+
+#recoding .pred_cllass 
+```
+
+### Investigating the Quantitative data
+
+```{r Quantitative data}
+describe(detectors_df$.pred_AI)
+describe(detectors_df$document_id)
+```
+
+### Missing Values
+
+```{r Missing Values}
+colSums(is.na(detectors_df))
+# It is importasnt. to not impute the missing values, because in "native" variable: NA indicates that it was not written by a human. and in the "prompt" variable NA-s indicating real examinations (like Real TOEFL).
+
+```
+
+### First model
+
+In the first model I am using binary logistic regression. Where I am curious is a GPT detector detects non-native people as AI. ##Frequentist appproach #Baseline model_1
+
+```{r baseline}
+model_baseline<- glm(native_2 ~ 1, data= detectors_df, family= "binomial")
+```
+
+### Test model_1
+
+```{r model_1}
+model_1<- glm(native_2 ~ .pred_AI, data= detectors_df, family= "binomial")
+anova(model_baseline, model_1, test= "LRT") #<- indicating significant diffference between the nullmodel and the testmodel
+summary(model_1)
+# AIC: 1685.8423
+```
+
+### Bayesian approach #Building the Bayes- null-model
+
+```{r bayesian}
+set.seed(123)
+bayes_model_0 <- brm(native_2 ~ 1, 
+                     data = detectors_df, 
+                     family = bernoulli(link = "logit"), seed=123,
+                     save_pars = save_pars(all = TRUE))
+
+```
+
+### Building the first model
+
+```{r}
+set.seed(123)
+bayes_model_1 <- brm(native_2~ .pred_AI, 
+                     data = detectors_df, 
+                     family = bernoulli(link = "logit"), seed=123,
+                     save_pars = save_pars(all = TRUE))
+
+set.seed(123)
+bayes_factor(bayes_model_1,
+             bayes_model_0)
+summary(bayes_model_1)
+```
+
+### Visualisation
+
+```{r viz_1}
+smooth_color <- viridis_pal(option = "viridis")(1)
+
+ggplot(detectors_df, aes(x=.pred_AI,
+                   y= native_2,
+                   color = .pred_AI))+
+  geom_jitter(height = .05,
+              alpha = 0.5,
+              size = 2) +
+  geom_smooth(method = "glm",
+               method.args = list(family ="binomial"),
+               se = F,
+              color = smooth_color)+
+  labs(x = "Probability of the text is  AI generated.", 
+       y= "Native English or not")+
+  scale_y_continuous(breaks = c(0, 1),labels = c("Non-Native", "Native"))+
+  theme_minimal() +
+  scale_color_viridis_c(option = "viridis")+
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.border = element_blank(),
+        axis.line = element_line(),
+        plot.background = element_rect(fill = "white"),
+        axis.text.x = element_text(color="black", size =8),
+        axis.text.y = element_text(color="black", size = 10),
+        axis.text = element_text(color="black"),
+        axis.title = element_text(color = "black", size = 11),
+        legend.title = element_blank())
+
+```
+
+Here I am courius which detector detects the most of the text as GPT (more precisely: which detector gives higher probability that a text is written by AI)
+
+#Normality check for question 2 with Shapiro-Wilk test
+
+```{r}
+
+by(detectors_df$.pred_AI, detectors_df$detector, function(x){shapiro.test(x)})
+```
+
+Equality of variances check with Levene-test
+
+```{r}
+leveneTest(.pred_AI~ detector, data= detectors_df)
+```
+
+Because both asumption did not met, I used Welch test on rang-numbers
+
+```{r}
+wrs2 <- t1way(.pred_AI~ detector, data= detectors_df, tr= 0.2)
+print(wrs2)
+#for exact p-value:
+
+wrs2$p.value #<- here also 0 indicating it is extremely low
+
+#To determine which group is differs from each other:
+post_hoc_bon <- lincon(.pred_AI~ detector, data= detectors_df,method = "bonferroni")
+print(post_hoc_bon)
+
+#The next is for determine which detector prediucts the most
+comparisons <- post_hoc_bon$comp[, 1:2]
+psihat_values <- post_hoc_bon$comp[, 3]
+
+# Create a data frame to hold the comparisons and psihat values
+comparison_df <- data.frame(comparisons, psihat_values)
+colnames(comparison_df) <- c("Group1", "Group2", "psihat")
+
+# Calculate the aggregate score for each name
+aggregate_scores <- comparison_df %>%
+  pivot_longer(cols = c(Group1, Group2), names_to = "Group", values_to = "value") %>%
+  group_by(value) %>%
+  summarise(score = sum(abs(psihat)))
+
+# Rank the names based on the aggregate scores
+ranked_scores <- aggregate_scores %>%
+  arrange(score)
+
+# Extract the group names
+group_names <- post_hoc_bon$fnames
+
+# Create a data frame to map group indices to names
+group_mapping <- data.frame(value = 1:length(group_names), name = group_names)
+
+# Merge the ranked scores with the group names
+ranked_scores_with_names <- merge(ranked_scores, group_mapping, by = "value")
+
+print(ranked_scores_with_names)
+```
+
+Although There are detectors that are significantly predicting more GPT, which one is hallucinating?
+
+```{r}
+model_2<- glm(native_2 ~ .pred_AI+ detector+ .pred_AI:detector, data= detectors_df, family= "binomial")
+anova(model_baseline, model_2, test= "LRT") #<- indicating significant diffference between the nullmodel and the testmodel
+summary(model_2)
+#AIC: 1644.9949
+```
+
+### 2/B is there any difference?
+
+```{r}
+model_2_b<- glm(native_2 ~ .pred_AI+detector, data= detectors_df, family= "binomial")
+anova(model_baseline, model_2_b, test= "LRT") #<- indicating significant diffference between the nullmodel and the testmodel
+summary(model_2_b)
+#AIC: 1671.699
+```
+
+Now splitting the data into significant and non-significant detectors based on the model_2 First removing the significant detectors from the model (also the interacting ones. )
+
+```{r}
+non_sig_pred_1 <- detectors_df %>%
+   filter(!detector %in% c("GPTZero", "OriginalityAI", "ZeroGPT"))
+
+
+model_baseline_2<- glm(native_2 ~ 1, data= non_sig_pred_1, family= "binomial")
+model_3<- glm(native_2 ~ .pred_AI+ detector+ .pred_AI: detector, data= non_sig_pred_1, family= "binomial")
+anova(model_baseline_2, model_3, test= "LRT") #<- indicating significant diffference between the nullmodel and the testmodel
+summary(model_3)
+#AIC: 948.78545
+
+#Testing the OG model too:
+model_1_1<- glm(native_2 ~ .pred_AI, data= non_sig_pred_1, family= "binomial")
+anova(model_baseline_2, model_1_1, test= "LRT")
+summary(model_1_1)
+#AIC: 942.23976
+
+#removing the non-significant ones
+sig_pred_1 <- detectors_df %>%
+   filter(!detector %in% c("HFOpenAI", "Quil", "Sapling","OriginalityAI"))
+
+model_baseline_3<- glm(native_2 ~ 1, data= sig_pred_1, family= "binomial")
+
+model_4<- glm(native_2 ~ .pred_AI+ detector+ .pred_AI: detector, data= sig_pred_1, family= "binomial")
+anova(model_baseline_3, model_4, test= "LRT") #<- indicating significant diffference between the nullmodel and the testmodel
+summary(model_4)
+#AIC: 773.45435
+
+#Testing the OG model too:
+model_1_2<- glm(native_2 ~ .pred_AI, data= sig_pred_1, family= "binomial")
+anova(model_baseline_3, model_1_2, test= "LRT")
+summary(model_1_2)
+# AIC: 798.49782
+```
+
+Now the same model, but without interaction
+
+```{r}
+model_5 <- glm(native_2 ~ .pred_AI + detector, data= detectors_df, family= "binomial")
+anova(model_baseline, model_5, test= "LRT")
+summary(model_5)
+# AIC: 1671.699
+#removing the significant groups
+non_sig_pred_2 <- detectors_df %>%
+   filter(!detector %in% c("GPTZero", "OriginalityAI"))
+
+model_baseline_4 <- glm(native_2 ~ 1, data= non_sig_pred_2, family= "binomial")
+model_6 <- glm(native_2 ~ .pred_AI + detector, data= non_sig_pred_2, family= "binomial")
+anova(model_baseline_4, model_6, test= "LRT")
+summary(model_6)
+# AIC: 1186.9468
+
+#Testing on the OG model
+model_7 <- glm(native_2 ~ .pred_AI, data= non_sig_pred_2, family= "binomial")
+anova(model_baseline_4, model_7, test= "LRT")
+summary(model_7)
+# AIC: 1183.7217
+
+#Removing the non_significant ones
+sig_pred_2 <- detectors_df %>%
+   filter(!detector %in% c("HFOpenAI", "Quil", "Sapling", "ZeroGPT"))
+
+model_baseline_5 <- glm(native_2 ~ 1, data= sig_pred_2, family= "binomial")
+model_8 <- glm(native_2 ~ .pred_AI+ detector, data= sig_pred_2, family= "binomial")
+anova(model_baseline_5, model_8, test= "LRT")
+summary(model_8)
+# AIC: 782.9127
+
+#OG model:
+model_9 <- glm(native_2 ~ .pred_AI, data= sig_pred_2, family= "binomial")
+anova(model_baseline_5, model_9, test= "LRT")
+summary(model_9)
+#  797.75039
+```
+
+Which AIC value is the best?
+
+```{r}
+aic_data <- data.frame(
+  Model = c("Model 1/A","Model 1/B","Model 1/C", "Model 2/A","Model 2/B", "Model 3", "Model 4", "Model 5", "Model 6", "Model 7", "Model 8"),
+  AIC = c(model_1$aic, model_1_1$aic, model_1_2$aic, model_2$aic, model_2_b$aic,  model_3$aic, model_4$aic, model_5$aic, model_6$aic, model_7$aic, model_8$aic)
+)
+
+aic_data
+
+#Visualising it
+# Identify the minimum AIC value
+aic_data$color <- ifelse(aic_data$AIC == min(aic_data$AIC), "Lowest", "Other")
+
+ggplot(aic_data, aes(x = Model, y = AIC, fill = color)) +
+  geom_bar(stat = "identity", show.legend = FALSE) +
+  theme_minimal() +
+  labs(
+    title = "AIC Values of Different Models",
+    x = "Model",
+    y = "AIC"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5, size = 14),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.border = element_blank(),
+    axis.line = element_line()
+  ) +
+  scale_fill_manual(values = c("Lowest" = "red", "Other" = viridis(1))) 
+```
+
+Predicting based on the .pred_AI which essay would fail, based on Decision tree
+
+```{r}
+model_dt <- rpart(name ~ .pred_AI, data= detectors_df)
+summary(model_dt)
+
+
+rpart.plot(model_dt, legend.x = NA)
+
+
+#More complex model (I did not add the model variable, because that doesn't make any sense, because the name of the essay implifies it too (see data) )
+model_dt_2 <- rpart(name ~ .pred_AI+ detector, data= detectors_df)
+summary(model_dt_2)
+rpart.plot(model_dt_2, legend.x = NA)
+
+```
+
+Comparing the essays and the prediction. Hypothesis: The Fake CS224N-GPT 3 will be the worst performing (it's .pred_AI score will be the highest) Based on the decision tree, where it was the test whichserved as a key point of decision.
+
+```{r}
+#Running shapiro-Wilk test to determine is the Assumption for Normality met or not
+by(detectors_df$.pred_AI, detectors_df$name, function(x){shapiro.test(x)}) #Violating
+
+
+#Running Levene's test to determine if the Equality of Variances met. 
+leveneTest(.pred_AI ~ name, data= detectors_df) #Violating
+
+#Running Welch test on rangnumbers =robust versionof the Welch test) 
+
+rW_2 <- t1way(.pred_AI ~ name, data= detectors_df, tr=0.2)
+print(rW_2)
+
+post_hoc_bon_2 <- lincon(.pred_AI~ name, data= detectors_df,method = "bonferroni")
+
+print(post_hoc_bon_2) #<- Fake College Essay Performed the worst
+comparisons_2 <- post_hoc_bon_2$comp[, 1:2]
+psihat_values_2 <- post_hoc_bon_2$comp[, 3]
+
+# Create a data frame for comparisons and psihat values
+comparison_df_2 <- data.frame(comparisons_2, psihat_values_2)
+colnames(comparison_df_2) <- c("Group1", "Group2", "psihat")
+
+# Calculate the aggregated score for each name
+aggregate_scores_2 <- comparison_df_2 %>%
+  pivot_longer(cols = c(Group1, Group2), names_to = "Group", values_to = "value") %>%
+  group_by(value) %>%
+  summarise(score = sum(abs(psihat)))
+
+# Rank the names based on the aggregate scores
+ranked_scores_2 <- aggregate_scores_2 %>%
+  arrange(score)
+
+# Group names extraction
+group_names_2 <- post_hoc_bon_2$fnames
+
+# Create a data frame to map group indices to names
+group_mapping_2 <- data.frame(value = 1:length(group_names_2), name = group_names_2)
+
+# Merge the ranked scores with the group names
+ranked_scores_with_names_2 <- merge(ranked_scores_2, group_mapping_2, by = "value")
+
+
+print(ranked_scores_with_names_2)
+
+```
+
+Investigating the previous decision tree, but now I am curious, whether the same pattern would appear, if I filter the data to only real essays, written by real people
+
+```{r }
+table(detectors_df$name)
+real_essay <- detectors_df %>%
+   filter(!name %in% c("Fake College Essays - GPT3", 
+                           "Fake CS224N - GPT3", 
+                           "Fake TOEFL - GPT4 - PE",
+                           "Fake College Essays - GPT3 Prompt Engineered ",
+                           "Fake CS224N - GPT3, PE",
+                           "US 8th grade essay - GPT simplify"))
+
+model_dt_real_essay <- rpart(name ~ .pred_AI, data= real_essay)
+summary(model_dt_real_essay)
+
+rpart.plot(model_dt_real_essay, legend.x = NA)
+
+
+#More complex model (I did not add the model variable, because that doesn't make any sense, because the name of the essay implifies it too (see data) )
+model_dt_real_essay_2 <- rpart(name ~ .pred_AI+ detector, data= real_essay)
+summary(model_dt_real_essay_2)
+rpart.plot(model_dt_real_essay_2, legend.x = NA)
+#Based on both tree the Real TOEFL is detected as AI written
+```
+
+#The same, but now with the Fake essays
+
+```{r }
+table(detectors_df$name)
+fake_essay <- detectors_df %>%
+   filter(!name %in% c("Real CS224N", 
+                           "US 8th grade essay", 
+                           "Real College Essays",
+                           "Real TOEFL"))
+
+model_dt_fake_essay <- rpart(name ~ .pred_AI, data= fake_essay)
+summary(model_dt_fake_essay)
+
+rpart.plot(model_dt_fake_essay , legend.x = NA)
+
+
+#More complex model (I did not add the model variable, because that doesn't make any sense, because the name of the essay implifies it too (see data) )
+model_dt_fake_essay_2 <- rpart(name ~ .pred_AI+ detector, data= fake_essay)
+summary(model_dt_fake_essay_2)
+rpart.plot(model_dt_fake_essay_2, legend.x = NA)
+#The worst performing  is Fake CS224N-GPT3, it is predicted with higher chances as AI, whereas, Fake CS224N- GPT3,, PE is the best. 
+```
+
+Validation remove the non native people from the sample. Due to the reason, that they are predicted more as AI. (See first point) NOTE: here is only the baseline model is investigated
+
+```{r }
+non_native <- detectors_df %>%
+   filter(!native %in% c("Yes"))
+
+model_non_native<- rpart(name ~ .pred_AI, data= non_native)
+summary(model_non_native)
+
+rpart.plot(model_non_native,legend.x = NA)
+
+model_native_2<- rpart(name ~ .pred_AI+ detector, data= non_native)
+summary(model_native_2)
+
+rpart.plot(model_native_2 , legend.x = NA) #<- detector variable is not contributing much in the importance (14%)
+
+
+
+#Native
+native <- detectors_df %>%
+   filter(native %in% c("Yes"))
+
+model_native<- rpart(name ~ .pred_AI, data= native)
+summary(model_native)
+
+rpart.plot(model_native , legend.x = NA)
+
+model_native_2<- rpart(name ~ .pred_AI+ detector, data= native)
+summary(model_native_2)
+
+rpart.plot(model_native_2 , legend.x = NA)
+```
+
+# Key takeaway
+
+-   People, who are non-native English speaker, are diagnosed more as AI, than the native people. This finding is crucial, for lecturers/teachers/examiners, who are using AI detectors, because the detector could haallucinate the writer as AI.
+
+-   Based on the ANOVA (more correctly: rang-Welch test's post-hoc comparison with Bonferroni-correction), the detector which gave the most prediction was GPTZero, with 0.98 score (see the code for details)
+
+-   Creating more logistic model to determine which given predictor has the most influence on the response variable: Model_4: native_2 \~ .pred_AI+ detector+ .pred_AI: detector, data= sig_pred_1, family= "binomial". NOTE: here I removed the non-significant detectors based on the native_2 \~ .pred_AI+detector, data= detectors_df, family= "binomial" model.
+
+-   The first decision tree is the simple model. Based onm the results we can say, if the predicted AI is larger than 0.034 it’s like to be the Fake CS224N- GPT3 essay. In the more complex model I added detector to, howeever the importance of the detector is 18% and .pred_A is 82%.
+
+-   Based on The rang-welch test the detectors are detectuiing the Fake College Essays - GPT3 as AI the most.
+
+-   Based ont he Decision tree model the Real TOEFL was predicted the most as AI.
+
+-   Based on the Decision tree model the Fake CS224N- GPT3 was predicted as AI the most.
+
+-   Based on the Decision tree model the Real TOEFL  was predicted as AI the most among non-native people.
+
+-   Among native the US 8th grader essay.
+
+-   **The results indicating the the AI detectors are not perfect. It detects US 8th grader essays as AI, indicating the detectors are looking for patterns in the data, which are more typical among adults.**
+
+-   **Furthermore the TOEFL which was written by real people is tend to score higher on AI detectors, because it is made specifically for foreign students, who do not write naturally or the words required by the test, are may not typical among everyday speakers.**
