@@ -1,3 +1,4 @@
+Final_project_v2_files/
 # History files
 .Rhistory
 .Rapp.history
@@ -47,7 +48,3 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
-
-# Final_project_v2_files
-Final_project_v2_files/
-

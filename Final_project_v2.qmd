@@ -50,7 +50,6 @@ detectors_df$model<- as.factor(detectors_df$model)
 table(detectors_df$prompt)
 detectors_df$prompt<- as.factor(detectors_df$prompt)
 detectors_df$native <- as.factor(detectors_df$native) 
-View(detectors_df)
 
 
 #recoding native - making sure 1 is for yes and no for 0 
