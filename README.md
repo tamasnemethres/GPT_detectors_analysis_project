@@ -1,3 +1,3 @@
 # GPT_detectors_analysis_project
 
-Here I am analysing the Tidytuesday dataset GPT detectors (see for details:
+https://tamasnemethres.github.io/GPT_detectors_analysis_project/
