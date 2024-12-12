@@ -508,4 +508,4 @@ rpart.plot(model_native_2 , legend.x = NA)
 
 -   **The results indicating the the AI detectors are not perfect. It detects US 8th grader essays as AI, indicating the detectors are looking for patterns in the data, which are more typical among adults.**
 
--   **Furthermore the TOEFL which was written by real people is tend to score higher on AI detectors, because it is made specifically for foreign students, who do not write naturally or the words required by the test, are may not typical among everyday speakers.**
+-   **Furthermore the TOEFL which was written by real people are tend to score higher on AI detectors, because it is made specifically for foreign students, who do not write naturally or the words required by the test, are may not typical among everyday speakers.**
