@@ -1,5 +1,5 @@
 ---
-title: "Final Project_v1"
+title: "GPT Detectors"
 format: html
 editor: visual
 editor_options: 
