@@ -6,11 +6,15 @@ editor_options:
   chunk_output_type: console
 ---
 
+## Disclaimer
+
+This is a data analytics/science project, focusing on the analysis of a TidyTuesday project. I have no intention to influence in any way any AI and/or AI detector company.
+
 ## The Data
 
 The data comes from the 29th Tidy Tuesday Projects (see more:https://github.com/rfordatascience/tidytuesday) in 2023. The Data is based on the paper of Liang et al.'s (2023) paper, which investigates the reliability of the GPT detectors.
 
-```{r}
+```{r  message=FALSE, warning=FALSE}
 library(tidyverse)
 library(tidytuesdayR)
 library(psych)
